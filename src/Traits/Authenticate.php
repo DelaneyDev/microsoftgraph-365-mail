@@ -13,7 +13,7 @@ trait Authenticate
 {
     private function refreshAccessToken($refreshtoken): void
     {
-        $tokenData = Http::asForm()->post('https://login.microsoftonline.com/'.config('services.microsoft.tenant').'/oauth2/token', $this->getRefreshFields($refreshtoken))->object();
+        $tokenData = Http::asForm()->post('https://login.microsoftonline.com/' . config('services.microsoft.tenant') . '/oauth2/token', $this->getRefreshFields($refreshtoken))->object();
         $this->dispatchCallbackReceived($tokenData);
     }
 
@@ -25,49 +25,69 @@ trait Authenticate
 
     public function callback(): void
     {
-            $tokenData = Http::asForm()->post('https://login.microsoftonline.com/' . config('services.microsoft.tenant') . '/oauth2/token', $this->getTokenFields(request('code')))->object();
-            $this->dispatchCallbackReceived($tokenData);
+        $tokenData = Http::asForm()->post('https://login.microsoftonline.com/' . config('services.microsoft.tenant') . '/oauth2/token', $this->getTokenFields(request('code')))->object();
+        $this->dispatchCallbackReceived($tokenData);
     }
 
     private function getAccessToken()
     {
-       // Prefer using a DB-stored token if in single-user mode
-       if (env('MICROSOFTGRAPH_SINGLE_USER', false)) {
-           $token = \App\Models\MicrosoftGraphAccessToken::latest()->firstOrFail();
-           if (now()->greaterThan($token->expires_at)) {
-               $response = Http::asForm()->post(
-                   'https://login.microsoftonline.com/' . env('MS_TENANT_ID') . '/oauth2/v2.0/token',
-                   [
-                       'client_id' => config('services.microsoft.client_id'),
-                       'client_secret' => config('services.microsoft.client_secret'),
-                       'grant_type' => 'refresh_token',
-                       'refresh_token' => Crypt::decrypt($token->refresh_token),
-                       'scope' => 'https://graph.microsoft.com/.default offline_access',
-                   ]
-               );
-               throw_if(! $response->successful(), new \Exception('Token refresh failed: ' . $response->body()));
-               $data = $response->json();
-               $token->update([
-                   'access_token' => Crypt::encrypt($data['access_token']),
-                   'refresh_token' => Crypt::encrypt($data['refresh_token'] ?? Crypt::decrypt($token->refresh_token)),
-                   'expires_at' => now()->addSeconds($data['expires_in']),
-               ]);
-           }
-           return Crypt::decrypt($token->access_token);
-       }
-       // Default fallback (original session logic)
-       if (! session()->has('microsoftgraph-access-data')) {
-           throw new \Exception('Please create a session variable named microsoftgraph-access-data with your access data as value');
-       }
-       $accessData = decrypt(session('microsoftgraph-access-data'));
-       if (isset($accessData->access_token)) {
-           if (Carbon::createFromTimestamp($accessData->expires_on)->lte(Carbon::now())) {
-               $this->refreshAccessToken($accessData->refresh_token);
-               $accessData = decrypt(session('microsoftgraph-access-data'));
-           }
-           return $accessData->access_token;
-       }
-       throw new \Exception('Your access data is invalid, please reconnect');
+        return $this->isSingleUserMode()
+            ? $this->getSingleUserAccessToken()
+            : $this->getSessionAccessToken();
+    }
+    private function isSingleUserMode(): bool
+    {
+        return config('microsoftgraph.single_user', false);
+    }
+    private function getSingleUserAccessToken(): string
+    {
+        $token = \App\Models\MicrosoftGraphAccessToken::latest()->firstOrFail();
+        
+        if (now()->greaterThan($token->expires_at)) {
+            $data = $this->refreshTokenFromApi(Crypt::decrypt($token->refresh_token));
+            $token->update([
+                'access_token' => Crypt::encrypt($data['access_token']),
+                'refresh_token' => Crypt::encrypt($data['refresh_token'] ?? Crypt::decrypt($token->refresh_token)),
+                'expires_at' => now()->addSeconds($data['expires_in']),
+            ]);
+        }
+
+        return Crypt::decrypt($token->access_token);
+    }
+    private function getSessionAccessToken(): string
+    {
+        if (!session()->has('microsoftgraph-access-data')) {
+            throw new \Exception('Please create a session variable named microsoftgraph-access-data with your access data as value');
+        }
+
+        $accessData = decrypt(session('microsoftgraph-access-data'));
+        if (!isset($accessData->access_token)) {
+            throw new \Exception('Your access data is invalid, please reconnect');
+        }
+
+        if (Carbon::createFromTimestamp($accessData->expires_on)->lte(Carbon::now())) {
+            $this->refreshAccessToken($accessData->refresh_token);
+            $accessData = decrypt(session('microsoftgraph-access-data'));
+        }
+
+        return $accessData->access_token;
+    }
+    private function refreshTokenFromApi(string $refreshToken): array
+    {
+        $response = Http::asForm()->post(
+            'https://login.microsoftonline.com/' . config('services.microsoft.tenant') . '/oauth2/v2.0/token',
+            [
+                'client_id' => config('services.microsoft.client_id'),
+                'client_secret' => config('services.microsoft.client_secret'),
+                'grant_type' => 'refresh_token',
+                'refresh_token' => $refreshToken,
+                'scope' => 'https://graph.microsoft.com/.default offline_access',
+            ]
+        );
+
+        throw_if(!$response->successful(), new \Exception('Token refresh failed: ' . $response->body()));
+
+        return $response->json();
     }
 
     private function getBaseFields()
