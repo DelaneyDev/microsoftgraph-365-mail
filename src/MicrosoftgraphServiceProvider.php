@@ -2,76 +2,64 @@
 
 namespace LLoadout\Microsoftgraph;
 
+use Illuminate\Support\ServiceProvider;
 use LLoadout\Microsoftgraph\Providers\EventServiceProvider;
-use Spatie\LaravelPackageTools\Package;
-use Spatie\LaravelPackageTools\PackageServiceProvider;
 
-class MicrosoftgraphServiceProvider extends PackageServiceProvider
+class MicrosoftgraphServiceProvider extends ServiceProvider
 {
-    public function configurePackage(Package $package): void
+    public function register(): void
     {
-        $package->name('microsoftgraph');
-
-        $this->buildRoutes();
-        $this->buildConfigs();
-        $this->buildFacades();
-
-        $this->app->register(EventServiceProvider::class);
-
+        $this->mergeConfigFrom(__DIR__ . '/../config/microsoftgraph.php', 'microsoftgraph');
     }
-
-    private function buildRoutes()
+    public function boot(): void
+    {
+        $this->loadRoutes();
+        if ($this->app->runningInConsole()) {
+            $this->publishes([
+                __DIR__ . '/Models/MicrosoftGraphAccessToken.php' => app_path('Models/MicrosoftGraphAccessToken.php'),
+            ], 'microsoftgraph-model');
+            $this->publishes([
+                __DIR__ . '/../config/microsoftgraph.php' => config_path('microsoftgraph.php'),
+            ], 'microsoftgraph-config');
+            $this->publishes([
+                __DIR__ . '/database/migrations/create_microsoft_graph_access_tokens_table.php.stub' =>
+                database_path('migrations/create_microsoft_graph_access_tokens_table.php.stub'),
+            ], 'microsoftgraph-migrations');
+        }
+        $this->registerDynamicConfig();
+        $this->app->register(EventServiceProvider::class);
+    }
+    protected function loadRoutes(): void
     {
         $this->app['router']->get('microsoft/connect', [
             'uses' => '\LLoadout\Microsoftgraph\Authenticate@connect',
             'as' => 'graph.connect',
         ])->middleware('web');
-
         $this->app['router']->get('microsoft/callback', [
             'uses' => '\LLoadout\Microsoftgraph\Authenticate@callback',
             'as' => 'graph.callback',
         ])->middleware('web');
     }
-
-    private function buildConfigs()
+    protected function registerDynamicConfig(): void
     {
-        $config = $this->app['config']->get('services', []);
-        $this->app['config']->set('services', array_merge([
-            'microsoft' => [
-                'tenant' => env('MS_TENANT_ID'),
-                'client_id' => env('MS_CLIENT_ID'),
-                'client_secret' => env('MS_CLIENT_SECRET'),
-                'redirect' => env('MS_REDIRECT_URL'),
-                'redirect_after_callback' => env('MS_REDIRECT_AFTER_CALLBACK_URL','/'),
-            ],
-        ], $config));
-
-        $config = $this->app['config']->get('mail', []);
-        $this->app['config']->set('mail.mailers', array_merge([
-            'microsoftgraph' => [
-                'transport' => 'microsoftgraph',
-            ],
-        ], $config['mailers']));
-
-        $config = $this->app['config']->get('filesystems.disks', []);
-        $this->app['config']->set('filesystems.disks', array_merge([
-            'onedrive' => [
-                'driver' => 'onedrive',
-                'root' => env('MS_ONEDRIVE_ROOT'),
-            ],
-        ], $config));
-
-    }
-
-    private function buildFacades()
-    {
-
-        $this->app->bind('teams', function ($app) {
-            return new \LLoadout\Microsoftgraph\Teams();
-        });
-
-        $this->app->bind('excel', function ($app) {
-            return new \LLoadout\Microsoftgraph\Excel();
-        });
+        $microsoftConfig = config('microsoftgraph');
+        $this->app['config']->set('services.microsoft', array_merge(
+            $this->app['config']->get('services.microsoft', []),
+            [
+                'tenant' => $microsoftConfig['tenant'] ?? null,
+                'client_id' => $microsoftConfig['client_id'] ?? null,
+                'client_secret' => $microsoftConfig['client_secret'] ?? null,
+                'redirect' => $microsoftConfig['redirect'] ?? null,
+                'redirect_after_callback' => $microsoftConfig['redirect_after_callback'] ?? '/',
+                'single_user' => $microsoftConfig['single_user'] ?? false,
+            ]
+        ));
+        $this->app['config']->set('mail.mailers.microsoftgraph', [
+            'transport' => 'microsoftgraph',
+        ]);
+        $this->app['config']->set('filesystems.disks.onedrive', [
+            'driver' => 'onedrive',
+            'root' => $microsoftConfig['onedrive_root'] ?? '/',
+        ]);
     }
 }

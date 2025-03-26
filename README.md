@@ -43,7 +43,67 @@ MS_REDIRECT_URL=https://your-url.com/microsoft/callback
 MS_REDIRECT_AFTER_CALLBACK_URL=https://your-url.com/dashboard
 ```
 
-## Connect your account
+# Microsoft 365 Mail Integration (Single User — OAuth2)
+Microsoft is deprecating SMTP for Office 365. This package provides a secure, OAuth2-based solution using Microsoft Graph — ideal for sending from a single `noreply@yourdomain.com` address.
+---
+## 1. Publish Required Files
+Before registering the service provider, publish the config, model, and migration:
+```bash
+php artisan vendor:publish --tag=microsoftgraph-config
+php artisan vendor:publish --tag=microsoftgraph-model
+php artisan vendor:publish --tag=microsoftgraph-migrations
+php artisan migrate
+```
+
+## 2. Register OAuth Token Listener
+Add this listener in your AppServiceProvider or EventServiceProvider
+```
+use Illuminate\Support\Facades\Event;
+use LLoadout\Microsoftgraph\Events\MicrosoftGraphCallbackReceived;
+use App\Models\MicrosoftGraphAccessToken;
+use Illuminate\Support\Facades\Crypt;
+use Carbon\Carbon;
+Event::listen(MicrosoftGraphCallbackReceived::class, function ($event) {
+   $accessData = (array) Crypt::decrypt($event->accessData);
+   MicrosoftGraphAccessToken::create([
+       'access_token' => Crypt::encrypt($accessData['access_token']),
+       'refresh_token' => Crypt::encrypt($accessData['refresh_token']),
+       'expires_at' => Carbon::createFromTimestamp((int) $accessData['expires_on']),
+   ]);
+});
+```
+## 3. Connect to Microsoft
+Visit the following URL (while logged in as the sending account):
+yourdomain/microsoft/connect
+This securely stores the token used for sending mail.
+## 4. Enable Single-User Mode
+Update your .env:
+```
+MICROSOFTGRAPH_SINGLE_USER=true
+MICROSOFTGRAPH_ENABLE_CONNECT=false
+```
+This disables session-based tokens and always uses the most recent stored token.
+## 5. Send Mail Like Normal
+```
+Mail::to('user@example.com')->send(new MyMailable());
+```
+Laravel will use the microsoftgraph mail driver under the hood.
+⸻
+Notes
+• This is a fork of the lloadout/microsoftgraph package.
+• We’ve added automatic token storage and single-user mode for simpler, secure no-reply use.
+Let me know if you want this in a file (`README.md`, etc.) or published to a repo.
+
+## Connect your account (scoped to authenticated user)
+
+make sure to enable 
+```
+MICROSOFTGRAPH_ENABLE_OAUTH=true
+```
+and disable 
+```
+MICROSOFTGRAPH_SINGLE_USER=false
+```
 
 The package uses OAuth and provides two routes
 
@@ -63,6 +123,8 @@ The callback will fire an MicrosoftGraphCallbackReceived event, you have to list
 You can add your token store logic in a listener for this event.
 
 ```
+use App\Models\MicrosoftGraphAccessToken;
+use LLoadout\Microsoftgraph\EventListeners\MicrosoftGraphCallbackReceived;
 public function boot()
 {
     Event::listen(function (MicrosoftGraphCallbackReceived $event) {

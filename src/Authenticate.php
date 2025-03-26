@@ -27,6 +27,9 @@ class Authenticate
      */
     public function connect()
     {
+        if (!config('microsoftgraph.enable_oauth_routes')) {
+            return abort(403);
+        }
         return Socialite::driver('microsoft')->with(['scope' => '.default', 'prompt' => 'consent'])->redirect();
     }
 
@@ -41,6 +44,9 @@ class Authenticate
      */
     public function callback()
     {
+        if (!config('microsoftgraph.enable_oauth_routes')) {
+            return abort(403);
+        }
         if (request()->has('error')) {
             MicrosoftGraphErrorReceived::dispatch(encrypt((object)['error' => request('error'), 'error_description' => request('error_description')]));
         } else {

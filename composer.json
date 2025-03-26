@@ -1,5 +1,5 @@
 {
-    "name": "lloadout/microsoftgraph",
+    "name": "delaneyarkict/microsoftgraph-365-mail",
     "description": "Laravel package for Microsoft graph (Microsoft 365). Manage mail, OneDrive, Teams, Excel, Calendars and Contacts with ease",
     "keywords": [
         "LLoadout",
@@ -26,18 +26,16 @@
     "require-dev": {
         "laravel/pint": "^1.10",
         "nunomaduro/larastan": "^2.0",
-            "orchestra/testbench": "^6.15|^8.0"
-
+        "orchestra/testbench": "^6.15|^8.0"
     },
     "autoload": {
         "psr-4": {
-            "LLoadout\\Microsoftgraph\\": "src",
-            "LLoadout\\Microsoftgraph\\Database\\Factories\\": "database/factories"
+            "LLoadout\\Microsoftgraph\\": "src/"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "LLoadout\\Microsoftgraph\\Tests\\": "tests"
+            "LLoadout\\Microsoftgraph\\Tests\\": "tests/"
         }
     },
     "scripts": {
