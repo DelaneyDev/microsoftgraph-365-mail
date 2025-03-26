@@ -1,5 +1,5 @@
 {
-    "name": "delaneyarkict/microsoftgraph-365-mail",
+    "name": "delaneydev/microsoftgraph-365-mail",
     "description": "Laravel package for Microsoft graph (Microsoft 365). Manage mail, OneDrive, Teams, Excel, Calendars and Contacts with ease",
     "keywords": [
         "LLoadout",
