@@ -11,22 +11,38 @@ use LLoadout\Microsoftgraph\EventListeners\MicrosoftGraphErrorReceived;
 
 trait Authenticate
 {
-    private function refreshAccessToken($refreshtoken): void
+    public function callback(): void
     {
-        $tokenData = Http::asForm()->post('https://login.microsoftonline.com/' . config('services.microsoft.tenant') . '/oauth2/token', $this->getRefreshFields($refreshtoken))->object();
+        $response = Http::asForm()->post(
+            'https://login.microsoftonline.com/' . config('services.microsoft.tenant') . '/oauth2/v2.0/token',
+            $this->getTokenFields(request('code'))
+        );
+
+        if (!$response->successful()) {
+            throw new \Exception('OAuth callback failed: ' . $response->body());
+        }
+
+        $tokenData = $response->object();
+
+        if (!isset($tokenData->access_token)) {
+            throw new \Exception('Access token missing in response: ' . json_encode($tokenData));
+        }
+
         $this->dispatchCallbackReceived($tokenData);
     }
 
     private function dispatchCallbackReceived($tokenData): void
     {
-        $user = Http::withToken($tokenData->access_token)->get('https://graph.microsoft.com/v1.0/me')->object();
-        MicrosoftGraphCallbackReceived::dispatch(encrypt((object) ['user' => $user, 'expires_on' => $tokenData->expires_on, 'access_token' => $tokenData->access_token, 'refresh_token' => $tokenData->refresh_token]));
-    }
+        $user = Http::withToken($tokenData->access_token)
+            ->get('https://graph.microsoft.com/v1.0/me')
+            ->object();
 
-    public function callback(): void
-    {
-        $tokenData = Http::asForm()->post('https://login.microsoftonline.com/' . config('services.microsoft.tenant') . '/oauth2/token', $this->getTokenFields(request('code')))->object();
-        $this->dispatchCallbackReceived($tokenData);
+        MicrosoftGraphCallbackReceived::dispatch(encrypt((object)[
+            'user' => $user,
+            'expires_on' => $tokenData->expires_on ?? Carbon::now()->addSeconds($tokenData->expires_in)->timestamp,
+            'access_token' => $tokenData->access_token,
+            'refresh_token' => $tokenData->refresh_token ?? null,
+        ]));
     }
 
     private function getAccessToken()
@@ -35,14 +51,16 @@ trait Authenticate
             ? $this->getSingleUserAccessToken()
             : $this->getSessionAccessToken();
     }
+
     private function isSingleUserMode(): bool
     {
         return config('microsoftgraph.single_user', false);
     }
+
     private function getSingleUserAccessToken(): string
     {
         $token = \App\Models\MicrosoftGraphAccessToken::latest()->firstOrFail();
-        
+
         if (now()->greaterThan($token->expires_at)) {
             $data = $this->refreshTokenFromApi(Crypt::decrypt($token->refresh_token));
             $token->update([
@@ -54,6 +72,7 @@ trait Authenticate
 
         return Crypt::decrypt($token->access_token);
     }
+
     private function getSessionAccessToken(): string
     {
         if (!session()->has('microsoftgraph-access-data')) {
@@ -61,6 +80,7 @@ trait Authenticate
         }
 
         $accessData = decrypt(session('microsoftgraph-access-data'));
+
         if (!isset($accessData->access_token)) {
             throw new \Exception('Your access data is invalid, please reconnect');
         }
@@ -72,6 +92,27 @@ trait Authenticate
 
         return $accessData->access_token;
     }
+
+    private function refreshAccessToken($refreshToken): void
+    {
+        $response = Http::asForm()->post(
+            'https://login.microsoftonline.com/' . config('services.microsoft.tenant') . '/oauth2/v2.0/token',
+            $this->getRefreshFields($refreshToken)
+        );
+
+        if (!$response->successful()) {
+            throw new \Exception('Token refresh failed (v2.0): ' . $response->body());
+        }
+
+        $tokenData = $response->object();
+
+        if (!isset($tokenData->access_token)) {
+            throw new \Exception('Access token missing in refresh response: ' . json_encode($tokenData));
+        }
+
+        $this->dispatchCallbackReceived($tokenData);
+    }
+
     private function refreshTokenFromApi(string $refreshToken): array
     {
         $response = Http::asForm()->post(
@@ -92,31 +133,28 @@ trait Authenticate
 
     private function getBaseFields()
     {
-        $base_args = [];
-        $base_args = Arr::add($base_args, 'client_id', config('services.microsoft.client_id'));
-        $base_args = Arr::add($base_args, 'client_secret', config('services.microsoft.client_secret'));
-        $base_args = Arr::add($base_args, 'redirect_uri', config('services.microsoft.redirect'));
-
-        return $base_args;
+        return [
+            'client_id' => config('services.microsoft.client_id'),
+            'client_secret' => config('services.microsoft.client_secret'),
+            'redirect_uri' => config('services.microsoft.redirect'),
+        ];
     }
 
     protected function getRefreshFields($refresh)
     {
-        $base_args = $this->getBaseFields();
-        $base_args = Arr::add($base_args, 'grant_type', 'refresh_token');
-        $base_args = Arr::add($base_args, 'scope', 'openid profile offline_access');
-        $base_args = Arr::add($base_args, 'refresh_token', $refresh);
-
-        return $base_args;
+        return array_merge($this->getBaseFields(), [
+            'grant_type' => 'refresh_token',
+            'scope' => 'openid profile offline_access',
+            'refresh_token' => $refresh,
+        ]);
     }
 
     protected function getTokenFields($code = null)
     {
-        $base_args = $this->getBaseFields();
-        $base_args = Arr::add($base_args, 'grant_type', 'authorization_code');
-        $base_args = Arr::add($base_args, 'code', $code);
-        $base_args = Arr::add($base_args, 'resource', 'https://graph.microsoft.com');
-
-        return $base_args;
+        return array_merge($this->getBaseFields(), [
+            'grant_type' => 'authorization_code',
+            'code' => $code,
+            'scope' => 'openid profile offline_access https://graph.microsoft.com/User.Read',
+        ]);
     }
 }
