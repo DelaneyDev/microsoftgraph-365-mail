@@ -113,18 +113,20 @@ class Mail
      * Convert attachments into Microsoft Graph API format
      *
      * @param iterable<DataPart|array{file:string}> $attachments
-     * @return array<int, array{name:string,contentId:string,contentBytes:string,contentType:string,size:int,'@odata.type':string,isInline:bool}>
+     * @return array<int,array{name:string,contentId:string,contentBytes:string,contentType:string,size:int,'@odata.type':string,isInline:bool}>
      */
     protected function toAttachmentCollection(iterable $attachments): array
     {
         $collection = [];
-    
+
         foreach ($attachments as $item) {
+            // Symfony 6+: DataPart instances
             if ($item instanceof DataPart) {
                 $filename = $item->getFilename() ?: 'attachment';
-                $raw      = (string) $item->getBody();
-                $mime     = $item->getMediaType().'/'.$item->getMediaSubtype();
+                $raw      = (string) $item->getBody(); // cast stream to string
+                $mime     = $item->getMediaType() . '/' . $item->getMediaSubtype();
             }
+            // Legacy array format: ['file' => '/path/to/file']
             elseif (is_array($item) && isset($item['file'])) {
                 $file     = new \SplFileObject($item['file'], 'r');
                 $raw      = $file->fread($file->getSize());
@@ -132,12 +134,13 @@ class Mail
                 $filename = $file->getFilename();
             }
             else {
+                // Skip anything unexpected
                 continue;
             }
-    
+
             $collection[] = [
                 'name'         => $filename,
-                'contentId'    => uniqid('', true).'@lloadout.graph',
+                'contentId'    => uniqid('', true) . '@lloadout.graph',
                 'contentBytes' => base64_encode($raw),
                 'contentType'  => $mime,
                 'size'         => strlen($raw),
@@ -145,7 +148,7 @@ class Mail
                 'isInline'     => true,
             ];
         }
-    
+
         return $collection;
     }
 
