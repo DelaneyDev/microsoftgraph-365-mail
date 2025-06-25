@@ -5,6 +5,7 @@ namespace LLoadout\Microsoftgraph;
 use Illuminate\Support\Carbon;
 use LLoadout\Microsoftgraph\Traits\Authenticate;
 use LLoadout\Microsoftgraph\Traits\Connect;
+use Symfony\Component\Mime\Part\DataPart;
 
 /**
  * Mail class for interacting with Microsoft Graph API's mail functionality
