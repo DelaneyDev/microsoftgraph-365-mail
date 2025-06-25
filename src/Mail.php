@@ -111,31 +111,40 @@ class Mail
     /**
      * Convert attachments into Microsoft Graph API format
      *
-     * @param array $attachments Array of attachment files
-     * @return array Formatted attachments array
+     * @param iterable<DataPart|array{file:string}> $attachments
+     * @return array<int, array{name:string,contentId:string,contentBytes:string,contentType:string,size:int,'@odata.type':string,isInline:bool}>
      */
-    protected function toAttachmentCollection($attachments): array
+    protected function toAttachmentCollection(iterable $attachments): array
     {
         $collection = [];
-
-        foreach ($attachments as $file) {
-            $file = new \SplFileObject($file['file'], 'r');
-            $body = $file->fread($file->getSize());
-            $imgdata = base64_decode($body);
-            $f = finfo_open();
-            $contentType = finfo_buffer($f, $imgdata, FILEINFO_MIME_TYPE);
-
+    
+        foreach ($attachments as $item) {
+            if ($item instanceof DataPart) {
+                $filename = $item->getFilename() ?: 'attachment';
+                $raw      = (string) $item->getBody();
+                $mime     = $item->getMediaType().'/'.$item->getMediaSubtype();
+            }
+            elseif (is_array($item) && isset($item['file'])) {
+                $file     = new \SplFileObject($item['file'], 'r');
+                $raw      = $file->fread($file->getSize());
+                $mime     = mime_content_type($item['file']) ?: 'application/octet-stream';
+                $filename = $file->getFilename();
+            }
+            else {
+                continue;
+            }
+    
             $collection[] = [
-                'name' => $file->getFilename(),
-                'contentId' => $file->getInode().'@lloadout.graph',
-                'contentBytes' => base64_encode($body),
-                'contentType' => $contentType,
-                'size' => strlen($body),
-                '@odata.type' => '#microsoft.graph.fileAttachment',
-                'isInline' => true,
+                'name'         => $filename,
+                'contentId'    => uniqid('', true).'@lloadout.graph',
+                'contentBytes' => base64_encode($raw),
+                'contentType'  => $mime,
+                'size'         => strlen($raw),
+                '@odata.type'  => '#microsoft.graph.fileAttachment',
+                'isInline'     => true,
             ];
         }
-
+    
         return $collection;
     }
 
