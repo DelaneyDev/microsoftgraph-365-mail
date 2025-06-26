@@ -4,7 +4,6 @@ namespace LLoadout\Microsoftgraph\MailManager;
 
 use Illuminate\Support\Collection;
 use LLoadout\Microsoftgraph\Traits\Connect;
-use LLoadout\Microsoftgraph\Traits\Authenticate;
 use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Mailer\Envelope;
@@ -17,7 +16,7 @@ use Symfony\Component\Mime\MessageConverter;
 
 class MicrosoftGraphTransport extends AbstractTransport
 {
-    use Connect, Authenticate;
+    use Connect,
 
     public function __construct(
         ?EventDispatcherInterface $dispatcher = null,
