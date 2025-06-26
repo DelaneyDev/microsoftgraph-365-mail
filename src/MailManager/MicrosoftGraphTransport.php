@@ -4,6 +4,7 @@ namespace LLoadout\Microsoftgraph\MailManager;
 
 use Illuminate\Support\Collection;
 use LLoadout\Microsoftgraph\Traits\Connect;
+use LLoadout\Microsoftgraph\Traits\Authenticate;
 use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Mailer\Envelope;
@@ -16,7 +17,7 @@ use Symfony\Component\Mime\MessageConverter;
 
 class MicrosoftGraphTransport extends AbstractTransport
 {
-    use Connect;
+    use Connect, Authenticate;
 
     public function __construct(
         ?EventDispatcherInterface $dispatcher = null,
@@ -36,30 +37,29 @@ class MicrosoftGraphTransport extends AbstractTransport
         $envelope = $message->getEnvelope();
 
         $html = $email->getHtmlBody();
-
         [$attachments, $html] = $this->prepareAttachments($email, $html);
 
         $payload = [
             'message' => [
-                'subject' => $email->getSubject(),
-                'body' => [
+                'subject'        => $email->getSubject(),
+                'body'           => [
                     'contentType' => $html === null ? 'Text' : 'HTML',
-                    'content' => $html ?: $email->getTextBody(),
+                    'content'     => $html ?: $email->getTextBody(),
                 ],
-                'toRecipients' => $this->transformEmailAddresses($this->getRecipients($email, $envelope)),
-                'ccRecipients' => $this->transformEmailAddresses(collect($email->getCc())),
-                'bccRecipients' => $this->transformEmailAddresses(collect($email->getBcc())),
-                'replyTo' => $this->transformEmailAddresses(collect($email->getReplyTo())),
-                'sender' => $this->transformEmailAddress($envelope->getSender()),
-                'attachments' => $attachments,
+                'toRecipients'   => $this->transformEmailAddresses($this->getRecipients($email, $envelope)),
+                'ccRecipients'   => $this->transformEmailAddresses(collect($email->getCc())),
+                'bccRecipients'  => $this->transformEmailAddresses(collect($email->getBcc())),
+                'replyTo'        => $this->transformEmailAddresses(collect($email->getReplyTo())),
+                'sender'         => $this->transformEmailAddress($envelope->getSender()),
+                'attachments'    => $attachments,
             ],
-            'saveToSentItems' => config('mail.mailers.microsoft-graph.save_to_sent_items', false) ?? false,
+            'saveToSentItems' => config('mail.mailers.microsoft-graph.save_to_sent_items', false),
         ];
 
-        if (filled($headers = $this->getInternetMessageHeaders($email))) {
+        if ($headers = $this->getInternetMessageHeaders($email)) {
             $payload['message']['internetMessageHeaders'] = $headers;
         }
-        //done 
+
         $this->post('/me/sendMail', $payload);
     }
 
@@ -68,16 +68,16 @@ class MicrosoftGraphTransport extends AbstractTransport
         $attachments = [];
 
         foreach ($email->getAttachments() as $attachment) {
-            $headers = $attachment->getPreparedHeaders();
-            $fileName = $headers->getHeaderParameter('Content-Disposition', 'filename');
+            $headers  = $attachment->getPreparedHeaders();
+            $filename = $headers->getHeaderParameter('Content-Disposition', 'filename');
 
             $attachments[] = [
-                '@odata.type' => '#microsoft.graph.fileAttachment',
-                'name' => $fileName,
-                'contentType' => $attachment->getMediaType() . '/' . $attachment->getMediaSubtype(),
+                '@odata.type'  => '#microsoft.graph.fileAttachment',
+                'name'         => $filename,
+                'contentType'  => $attachment->getMediaType().'/'.$attachment->getMediaSubtype(),
                 'contentBytes' => base64_encode($attachment->getBody()),
-                'contentId' => $fileName,
-                'isInline' => $headers->getHeaderBody('Content-Disposition') === 'inline',
+                'contentId'    => $filename,
+                'isInline'     => $headers->getHeaderBody('Content-Disposition') === 'inline',
             ];
         }
 
@@ -87,7 +87,7 @@ class MicrosoftGraphTransport extends AbstractTransport
     protected function transformEmailAddresses(Collection $recipients): array
     {
         return $recipients
-            ->map(fn(Address $recipient) => $this->transformEmailAddress($recipient))
+            ->map(fn(Address $r) => $this->transformEmailAddress($r))
             ->toArray();
     }
 
@@ -103,18 +103,20 @@ class MicrosoftGraphTransport extends AbstractTransport
     protected function getRecipients(Email $email, Envelope $envelope): Collection
     {
         return collect($envelope->getRecipients())
-            ->filter(fn(Address $address) => ! in_array($address, array_merge($email->getCc(), $email->getBcc()), true));
+            ->filter(fn(Address $addr) => ! in_array($addr, array_merge($email->getCc(), $email->getBcc()), true));
     }
 
     protected function getInternetMessageHeaders(Email $email): ?array
     {
-        return collect($email->getHeaders()->all())
-            ->filter(fn(HeaderInterface $header) => str_starts_with($header->getName(), 'X-'))
-            ->map(fn(HeaderInterface $header) => [
-                'name' => $header->getName(),
-                'value' => $header->getBodyAsString(),
+        $headers = collect($email->getHeaders()->all())
+            ->filter(fn(HeaderInterface $h) => str_starts_with($h->getName(), 'X-'))
+            ->map(fn(HeaderInterface $h) => [
+                'name'  => $h->getName(),
+                'value' => $h->getBodyAsString(),
             ])
             ->values()
-            ->all() ?: null;
+            ->all();
+
+        return $headers ?: null;
     }
 }
