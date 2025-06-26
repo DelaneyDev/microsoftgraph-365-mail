@@ -2,113 +2,119 @@
 
 namespace LLoadout\Microsoftgraph\MailManager;
 
-use Symfony\Component\Mailer\Transport\AbstractTransport;
-use Symfony\Component\Mime\RawMessage;
-use Symfony\Component\Mime\Email;
-use Symfony\Component\Mime\MessageConverter;
-use Symfony\Component\Mime\Address;
+use Illuminate\Support\Collection;
+use LLoadout\Microsoftgraph\Traits\Connect;
+use Psr\EventDispatcher\EventDispatcherInterface;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\Mailer\Envelope;
 use Symfony\Component\Mailer\SentMessage;
+use Symfony\Component\Mailer\Transport\AbstractTransport;
+use Symfony\Component\Mime\Address;
+use Symfony\Component\Mime\Email;
 use Symfony\Component\Mime\Header\HeaderInterface;
-use Illuminate\Support\Facades\Log;
-use LLoadout\Microsoftgraph\Traits\Authenticate;
-use LLoadout\Microsoftgraph\Traits\Connect;
+use Symfony\Component\Mime\MessageConverter;
 
 class MicrosoftGraphTransport extends AbstractTransport
 {
-    use Authenticate, Connect;
+    use Connect;
+
+    public function __construct(
+        ?EventDispatcherInterface $dispatcher = null,
+        ?LoggerInterface $logger = null
+    ) {
+        parent::__construct($dispatcher, $logger);
+    }
 
     public function __toString(): string
     {
-        return 'microsoftgraph://';
+        return 'microsoft+graph+api://';
     }
 
     protected function doSend(SentMessage $message): void
     {
-        $email = MessageConverter::toEmail($message->getOriginalMessage());
+        $email    = MessageConverter::toEmail($message->getOriginalMessage());
         $envelope = $message->getEnvelope();
 
         $html = $email->getHtmlBody();
-        $attachments = $this->prepareAttachments($email);
+
+        [$attachments, $html] = $this->prepareAttachments($email, $html);
 
         $payload = [
             'message' => [
                 'subject' => $email->getSubject(),
                 'body' => [
-                    'contentType' => $html ? 'HTML' : 'Text',
+                    'contentType' => $html === null ? 'Text' : 'HTML',
                     'content' => $html ?: $email->getTextBody(),
                 ],
-                'toRecipients' => $this->transformAddresses($envelope->getRecipients()),
-                'ccRecipients' => $this->transformAddresses($email->getCc()),
-                'bccRecipients' => $this->transformAddresses($email->getBcc()),
-                'replyTo' => $this->transformAddresses($email->getReplyTo()),
-                'from' => $this->transformAddress($envelope->getSender()),
+                'toRecipients' => $this->transformEmailAddresses($this->getRecipients($email, $envelope)),
+                'ccRecipients' => $this->transformEmailAddresses(collect($email->getCc())),
+                'bccRecipients' => $this->transformEmailAddresses(collect($email->getBcc())),
+                'replyTo' => $this->transformEmailAddresses(collect($email->getReplyTo())),
+                'sender' => $this->transformEmailAddress($envelope->getSender()),
                 'attachments' => $attachments,
             ],
-            'saveToSentItems' => false,
+            'saveToSentItems' => config('mail.mailers.microsoft-graph.save_to_sent_items', false) ?? false,
         ];
 
-        if ($headers = $this->extractCustomHeaders($email)) {
+        if (filled($headers = $this->getInternetMessageHeaders($email))) {
             $payload['message']['internetMessageHeaders'] = $headers;
         }
-
-        Log::debug('Microsoft Graph Mail Payload', ['payload' => $payload]);
-
+        //done 
         $this->post('/me/sendMail', $payload);
     }
 
-    protected function prepareAttachments(Email $email): array
+    protected function prepareAttachments(Email $email, ?string $html): array
     {
         $attachments = [];
 
         foreach ($email->getAttachments() as $attachment) {
-            try {
-                $headers = $attachment->getPreparedHeaders();
-                $filename = $headers->getHeaderParameter('Content-Disposition', 'filename') ?? 'attachment';
-                $content = (string) $attachment->getBody();
-                $mime = $attachment->getMediaType() . '/' . $attachment->getMediaSubtype();
+            $headers = $attachment->getPreparedHeaders();
+            $fileName = $headers->getHeaderParameter('Content-Disposition', 'filename');
 
-                $attachments[] = [
-                    '@odata.type' => '#microsoft.graph.fileAttachment',
-                    'name' => $filename,
-                    'contentType' => $mime,
-                    'contentBytes' => base64_encode($content),
-                    'contentId' => $filename,
-                    'isInline' => $headers->getHeaderBody('Content-Disposition') === 'inline',
-                ];
-            } catch (\Throwable $e) {
-                Log::error("Attachment processing failed: " . $e->getMessage(), [
-                    'trace' => $e->getTraceAsString(),
-                ]);
-            }
+            $attachments[] = [
+                '@odata.type' => '#microsoft.graph.fileAttachment',
+                'name' => $fileName,
+                'contentType' => $attachment->getMediaType() . '/' . $attachment->getMediaSubtype(),
+                'contentBytes' => base64_encode($attachment->getBody()),
+                'contentId' => $fileName,
+                'isInline' => $headers->getHeaderBody('Content-Disposition') === 'inline',
+            ];
         }
 
-        Log::debug("Prepared attachments", ['attachments' => $attachments]);
-
-        return $attachments;
+        return [$attachments, $html];
     }
 
-    protected function transformAddresses(array $addresses): array
+    protected function transformEmailAddresses(Collection $recipients): array
     {
-        return array_map([$this, 'transformAddress'], $addresses);
+        return $recipients
+            ->map(fn(Address $recipient) => $this->transformEmailAddress($recipient))
+            ->toArray();
     }
 
-    protected function transformAddress(Address $address): array
+    protected function transformEmailAddress(Address $address): array
     {
         return [
             'emailAddress' => [
                 'address' => $address->getAddress(),
-                'name' => $address->getName(),
             ],
         ];
     }
 
-    protected function extractCustomHeaders(Email $email): array
+    protected function getRecipients(Email $email, Envelope $envelope): Collection
+    {
+        return collect($envelope->getRecipients())
+            ->filter(fn(Address $address) => ! in_array($address, array_merge($email->getCc(), $email->getBcc()), true));
+    }
+
+    protected function getInternetMessageHeaders(Email $email): ?array
     {
         return collect($email->getHeaders()->all())
-            ->filter(fn (HeaderInterface $h) => str_starts_with($h->getName(), 'X-'))
-            ->map(fn (HeaderInterface $h) => ['name' => $h->getName(), 'value' => $h->getBodyAsString()])
+            ->filter(fn(HeaderInterface $header) => str_starts_with($header->getName(), 'X-'))
+            ->map(fn(HeaderInterface $header) => [
+                'name' => $header->getName(),
+                'value' => $header->getBodyAsString(),
+            ])
             ->values()
-            ->all();
+            ->all() ?: null;
     }
 }
