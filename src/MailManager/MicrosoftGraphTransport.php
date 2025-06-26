@@ -68,16 +68,21 @@ class MicrosoftGraphTransport extends AbstractTransport
         $attachments = [];
 
         foreach ($email->getAttachments() as $attachment) {
-            $headers  = $attachment->getPreparedHeaders();
-            $filename = $headers->getHeaderParameter('Content-Disposition', 'filename');
+            // skip anything marked inline
+            if ($attachment->getDisposition() === 'inline') {
+                continue;
+            }
+
+            // use the real filename
+            $filename = $attachment->getName() ?: 'attachment';
 
             $attachments[] = [
-                '@odata.type'  => '#microsoft.graph.fileAttachment',
-                'name'         => $filename,
-                'contentType'  => $attachment->getMediaType().'/'.$attachment->getMediaSubtype(),
-                'contentBytes' => base64_encode($attachment->getBody()),
-                'contentId'    => $filename,
-                'isInline'     => $headers->getHeaderBody('Content-Disposition') === 'inline',
+                '@odata.type'   => '#microsoft.graph.fileAttachment',
+                'name'          => $filename,
+                'contentType'   => $attachment->getMediaType() . '/' . $attachment->getMediaSubtype(),
+                'contentBytes'  => base64_encode($attachment->getBody()),
+                'contentId'     => $filename,
+                'isInline'      => false,
             ];
         }
 

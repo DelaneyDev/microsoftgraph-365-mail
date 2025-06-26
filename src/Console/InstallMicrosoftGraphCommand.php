@@ -30,7 +30,7 @@ class InstallMicrosoftGraphCommand extends Command
        }
        // Migration
        $timestamp = date('Y_m_d_His');
-       $migrationSource = __DIR__ . '/../../Database/Migrations/create_microsoft_graph_access_tokens_table.php.stub';
+       $migrationSource = __DIR__ . '/../../Database/Migrations/create_microsoft_graph_access_tokens_table.php';
        $migrationDest = database_path("migrations/{$timestamp}_create_microsoft_graph_access_tokens_table.php");
        if (!File::exists($migrationDest)) {
            File::copy($migrationSource, $migrationDest);
