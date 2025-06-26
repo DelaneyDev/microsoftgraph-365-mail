@@ -119,89 +119,35 @@ class Mail
     {
         $collection = [];
 
-        foreach ($attachments as $index => $item) {
-            try {
-                Log::info("Attachment #{$index} - Initial inspection:", [
-                    'type' => gettype($item),
-                    'is_object' => is_object($item),
-                    'class' => is_object($item) ? get_class($item) : 'N/A',
-                    'value' => is_object($item) ? method_exists($item, '__toString') ? (string) $item : json_encode((array)$item) : json_encode($item),
-                ]);
-
-                if ($item instanceof DataPart) {
-                    $filename = $item->getFilename() ?? 'attachment';
-                    $mime = $item->getMediaType() . '/' . $item->getMediaSubtype();
-
-                    // Attempt stream to string conversion
-                    $bodyStream = $item->getBody();
-                    $raw = '';
-
-                    try {
-                        $raw = (string) $bodyStream;
-                        Log::info("Attachment #{$index} - Stream successfully read", [
-                            'filename' => $filename,
-                            'size' => strlen($raw),
-                            'mime' => $mime,
-                        ]);
-                    } catch (\Throwable $streamError) {
-                        Log::error("Attachment #{$index} - Failed to read stream", [
-                            'filename' => $filename,
-                            'error' => $streamError->getMessage(),
-                        ]);
-                        continue;
-                    }
-
-                    $collection[] = [
-                        'name' => $filename,
-                        'contentId' => uniqid('', true) . '@lloadout.graph',
-                        'contentBytes' => base64_encode($raw),
-                        'contentType' => $mime,
-                        'size' => strlen($raw),
-                        '@odata.type' => '#microsoft.graph.fileAttachment',
-                        'isInline' => true,
-                    ];
-                } elseif (is_array($item) && isset($item['file'])) {
-                    Log::info("Attachment #{$index} - Array attachment detected", [
-                        'file' => $item['file']
-                    ]);
-
-                    if (!file_exists($item['file'])) {
-                        Log::warning("Attachment #{$index} - File does not exist", [
-                            'file' => $item['file']
-                        ]);
-                        continue;
-                    }
-
-                    $file = new \SplFileObject($item['file'], 'rb');
-                    $raw = $file->fread($file->getSize());
-                    $mime = mime_content_type($item['file']) ?: 'application/octet-stream';
-
-                    $collection[] = [
-                        'name' => $file->getFilename(),
-                        'contentId' => uniqid('', true) . '@lloadout.graph',
-                        'contentBytes' => base64_encode($raw),
-                        'contentType' => $mime,
-                        'size' => strlen($raw),
-                        '@odata.type' => '#microsoft.graph.fileAttachment',
-                        'isInline' => true,
-                    ];
-                } else {
-                    Log::warning("Attachment #{$index} - Unknown format. Skipped.", [
-                        'data' => json_encode($item),
-                    ]);
-                }
-            } catch (\Throwable $e) {
-                Log::error("Attachment #{$index} - Fatal processing error", [
-                    'error' => $e->getMessage(),
-                    'trace' => $e->getTraceAsString(),
-                ]);
+        foreach ($attachments as $item) {
+            // Symfony 6+: DataPart instances
+            if ($item instanceof DataPart) {
+                $filename = $item->getFilename() ?: 'attachment';
+                $raw      = (string) $item->getBody(); // cast stream to string
+                $mime     = $item->getMediaType() . '/' . $item->getMediaSubtype();
             }
-        }
+            // Legacy array format: ['file' => '/path/to/file']
+            elseif (is_array($item) && isset($item['file'])) {
+                $file     = new \SplFileObject($item['file'], 'r');
+                $raw      = $file->fread($file->getSize());
+                $mime     = mime_content_type($item['file']) ?: 'application/octet-stream';
+                $filename = $file->getFilename();
+            }
+            else {
+                // Skip anything unexpected
+                continue;
+            }
 
-        Log::info("Final attachment collection built", [
-            'count' => count($collection),
-            'keys' => array_keys($collection),
-        ]);
+            $collection[] = [
+                'name'         => $filename,
+                'contentId'    => uniqid('', true) . '@lloadout.graph',
+                'contentBytes' => base64_encode($raw),
+                'contentType'  => $mime,
+                'size'         => strlen($raw),
+                '@odata.type'  => '#microsoft.graph.fileAttachment',
+                'isInline'     => true,
+            ];
+        }
 
         return $collection;
     }
@@ -213,7 +159,7 @@ class Mail
      */
     public function getMailFolders()
     {
-        $url = '/me/mailfolders';
+        $url ='/me/mailfolders';
 
         return $this->get($url);
     }
@@ -242,7 +188,7 @@ class Mail
      */
     public function getMailMessagesFromFolder($folder = 'inbox', $isRead = true, $skip = 0, $limit = 20)
     {
-        $url = '/me/mailfolders/' . $folder . '/messages?$select=Id,ReceivedDateTime,Subject,Sender,ToRecipients,From,Body,HasAttachments,InternetMessageHeaders&$skip=' . $skip . '&$top=' . $limit;
+        $url = '/me/mailfolders/' . $folder . '/messages?$select=Id,ReceivedDateTime,Subject,Sender,ToRecipients,From,Body,HasAttachments,InternetMessageHeaders&$skip='.$skip.'&$top='.$limit;
         if (! $isRead) {
             $url .= '&$filter=isRead ne true';
         }
