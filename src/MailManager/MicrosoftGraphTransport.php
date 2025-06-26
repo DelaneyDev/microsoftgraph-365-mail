@@ -23,10 +23,10 @@ class MicrosoftGraphTransport extends AbstractTransport
         return 'microsoftgraph://';
     }
 
-    public function send(RawMessage $message, ?Envelope $envelope = null): ?SentMessage
+    protected function doSend(SentMessage $message): void
     {
-        $email = MessageConverter::toEmail($message);
-        $envelope = $envelope ?? Envelope::create($email);
+        $email = MessageConverter::toEmail($message->getOriginalMessage());
+        $envelope = $message->getEnvelope();
 
         $html = $email->getHtmlBody();
         $attachments = $this->prepareAttachments($email);
@@ -52,10 +52,9 @@ class MicrosoftGraphTransport extends AbstractTransport
             $payload['message']['internetMessageHeaders'] = $headers;
         }
 
-        // Actually send via Microsoft Graph API
-        $this->post('/me/sendMail', $payload);
+        Log::debug('Microsoft Graph Mail Payload', ['payload' => $payload]);
 
-        return new SentMessage($message, $envelope);
+        $this->post('/me/sendMail', $payload);
     }
 
     protected function prepareAttachments(Email $email): array
