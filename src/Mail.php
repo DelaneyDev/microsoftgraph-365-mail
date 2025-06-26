@@ -2,17 +2,23 @@
 
 namespace LLoadout\Microsoftgraph;
 
-use Illuminate\Support\Collection;
-use Symfony\Component\Mailer\Envelope;
-use Symfony\Component\Mime\Address;
-use Symfony\Component\Mime\Email;
-use Symfony\Component\Mime\Header\HeaderInterface;
-use Symfony\Component\Mime\MessageConverter;
-use Symfony\Component\Mime\RawMessage;
+use Illuminate\Support\Carbon;
+use LLoadout\Microsoftgraph\Traits\Authenticate;
+use LLoadout\Microsoftgraph\Traits\Connect;
+use Symfony\Component\Mime\Part\DataPart;
 
-use Traits\Authenticate;
-use Traits\Connect;
-
+/**
+ * Mail class for interacting with Microsoft Graph API's mail functionality
+ *
+ * This class provides methods to interact with Microsoft Graph API's mail features including:
+ * - Sending emails with attachments
+ * - Managing mail folders
+ * - Reading and managing messages
+ * - Moving messages between folders
+ * - Retrieving message attachments
+ *
+ * @package LLoadout\Microsoftgraph
+ */
 class Mail
 {
     use Authenticate, Connect;
@@ -20,93 +26,298 @@ class Mail
     /**
      * Send an email using Microsoft Graph API
      *
-     * @param RawMessage $message
-     * @param Envelope|null $envelope
+     * @param mixed $mailable The mailable object containing email details
      * @return void
      */
-    public function sendMail(RawMessage $message, ?Envelope $envelope = null): void
+    public function sendMail($mailable): void
     {
-        $email = MessageConverter::toEmail($message);
-        $envelope ??= new Envelope($email->getFrom()[0]);
-
-        [$attachments, $html] = $this->prepareAttachments($email);
-
-        $payload = [
-            'message' => [
-                'subject' => $email->getSubject(),
-                'body' => [
-                    'contentType' => $html === null ? 'Text' : 'HTML',
-                    'content' => $html ?: $email->getTextBody(),
-                ],
-                'toRecipients' => $this->formatAddresses($this->getToRecipients($email, $envelope)),
-                'ccRecipients' => $this->formatAddresses(collect($email->getCc())),
-                'bccRecipients' => $this->formatAddresses(collect($email->getBcc())),
-                'replyTo' => $this->formatAddresses(collect($email->getReplyTo())),
-                'sender' => $this->formatAddress($envelope->getSender()),
-                'attachments' => $attachments,
-            ],
-            'saveToSentItems' => config('mail.mailers.microsoftgraph.save_to_sent_items', false),
-        ];
-
-        if ($headers = $this->getCustomHeaders($email)) {
-            $payload['message']['internetMessageHeaders'] = $headers;
-        }
-
-        $this->post('/me/sendMail', $payload);
+        $this->post('/me/sendMail', $this->getBody($mailable));
     }
 
-    protected function prepareAttachments(Email $email): array
+    /**
+     * Prepare the email body for sending
+     *
+     * @param mixed $mailable The mailable object
+     * @return array The formatted email body
+     */
+    protected function getBody($mailable)
     {
-        $attachments = [];
-        $html = $email->getHtmlBody();
+        $html = $mailable->getHtmlBody();
+        $from = $mailable->getFrom();
+        $to = $mailable->getTo();
+        $cc = $mailable->getCc();
+        $bcc = $mailable->getBcc();
+        $replyTo = $mailable->getReplyTo();
+        $subject = $mailable->getSubject();
 
-        foreach ($email->getAttachments() as $attachment) {
-            $headers = $attachment->getPreparedHeaders();
-            $fileName = $headers->getHeaderParameter('Content-Disposition', 'filename');
+        return array_filter([
+            'message' => [
+                'subject' => $subject,
+                'sender' => $this->formatRecipients($from)[0],
+                'from' => $this->formatRecipients($from)[0],
+                'replyTo' => $this->formatRecipients($replyTo),
+                'toRecipients' => $this->formatRecipients($to),
+                'ccRecipients' => $this->formatRecipients($cc),
+                'bccRecipients' => $this->formatRecipients($bcc),
+                'body' => $this->getContent($html),
+                'attachments' => $this->toAttachmentCollection($mailable->getAttachments()),
+            ],
+        ]);
+    }
 
-            $attachments[] = [
-                '@odata.type' => '#microsoft.graph.fileAttachment',
-                'name' => $fileName,
-                'contentType' => $attachment->getMediaType() . '/' . $attachment->getMediaSubtype(),
-                'contentBytes' => base64_encode((string) $attachment->getBody()),
-                'contentId' => $fileName,
-                'isInline' => $headers->getHeaderBody('Content-Disposition') === 'inline',
+    /**
+     * Format email recipients into Microsoft Graph API format
+     *
+     * @param mixed $recipients Single recipient or array of recipients
+     * @return array Formatted recipients array
+     */
+    protected function formatRecipients($recipients): array
+    {
+        $addresses = [];
+
+        if (! $recipients) {
+            return $addresses;
+        }
+
+        if (! is_countable($recipients)) {
+            $recipients = [$recipients];
+        }
+
+        foreach ($recipients as $address) {
+            $addresses[] = [
+                'emailAddress' => [
+                    'name' => $address->getName(),
+                    'address' => $address->getAddress(),
+                ],
             ];
         }
 
-        return [$attachments, $html];
+        return $addresses;
     }
 
-    protected function getToRecipients(Email $email, Envelope $envelope): Collection
-    {
-        return collect($envelope->getRecipients())
-            ->reject(fn(Address $r) => in_array($r, array_merge($email->getCc(), $email->getBcc()), true));
-    }
-
-    protected function formatAddress(Address $address): array
+    /**
+     * Format email content into Microsoft Graph API format
+     *
+     * @param string $html HTML content of the email
+     * @return array Formatted content array
+     */
+    private function getContent($html): array
     {
         return [
-            'emailAddress' => [
-                'address' => $address->getAddress(),
-                'name' => $address->getName() ?? '',
-            ],
+            'contentType' => 'html',
+            'content' => $html,
         ];
     }
 
-    protected function formatAddresses(Collection $addresses): array
+    /**
+     * Convert attachments into Microsoft Graph API format
+     *
+     * @param iterable<DataPart|array{file:string}> $attachments
+     * @return array<int,array{name:string,contentId:string,contentBytes:string,contentType:string,size:int,'@odata.type':string,isInline:bool}>
+     */
+    protected function toAttachmentCollection(iterable $attachments): array
     {
-        return $addresses->map(fn(Address $a) => $this->formatAddress($a))->values()->all();
+        $collection = [];
+
+        foreach ($attachments as $index => $item) {
+            try {
+                Log::info("Attachment #{$index} - Initial inspection:", [
+                    'type' => gettype($item),
+                    'is_object' => is_object($item),
+                    'class' => is_object($item) ? get_class($item) : 'N/A',
+                    'value' => is_object($item) ? method_exists($item, '__toString') ? (string) $item : json_encode((array)$item) : json_encode($item),
+                ]);
+
+                if ($item instanceof DataPart) {
+                    $filename = $item->getFilename() ?? 'attachment';
+                    $mime = $item->getMediaType() . '/' . $item->getMediaSubtype();
+
+                    // Attempt stream to string conversion
+                    $bodyStream = $item->getBody();
+                    $raw = '';
+
+                    try {
+                        $raw = (string) $bodyStream;
+                        Log::info("Attachment #{$index} - Stream successfully read", [
+                            'filename' => $filename,
+                            'size' => strlen($raw),
+                            'mime' => $mime,
+                        ]);
+                    } catch (\Throwable $streamError) {
+                        Log::error("Attachment #{$index} - Failed to read stream", [
+                            'filename' => $filename,
+                            'error' => $streamError->getMessage(),
+                        ]);
+                        continue;
+                    }
+
+                    $collection[] = [
+                        'name' => $filename,
+                        'contentId' => uniqid('', true) . '@lloadout.graph',
+                        'contentBytes' => base64_encode($raw),
+                        'contentType' => $mime,
+                        'size' => strlen($raw),
+                        '@odata.type' => '#microsoft.graph.fileAttachment',
+                        'isInline' => true,
+                    ];
+                } elseif (is_array($item) && isset($item['file'])) {
+                    Log::info("Attachment #{$index} - Array attachment detected", [
+                        'file' => $item['file']
+                    ]);
+
+                    if (!file_exists($item['file'])) {
+                        Log::warning("Attachment #{$index} - File does not exist", [
+                            'file' => $item['file']
+                        ]);
+                        continue;
+                    }
+
+                    $file = new \SplFileObject($item['file'], 'rb');
+                    $raw = $file->fread($file->getSize());
+                    $mime = mime_content_type($item['file']) ?: 'application/octet-stream';
+
+                    $collection[] = [
+                        'name' => $file->getFilename(),
+                        'contentId' => uniqid('', true) . '@lloadout.graph',
+                        'contentBytes' => base64_encode($raw),
+                        'contentType' => $mime,
+                        'size' => strlen($raw),
+                        '@odata.type' => '#microsoft.graph.fileAttachment',
+                        'isInline' => true,
+                    ];
+                } else {
+                    Log::warning("Attachment #{$index} - Unknown format. Skipped.", [
+                        'data' => json_encode($item),
+                    ]);
+                }
+            } catch (\Throwable $e) {
+                Log::error("Attachment #{$index} - Fatal processing error", [
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
+                ]);
+            }
+        }
+
+        Log::info("Final attachment collection built", [
+            'count' => count($collection),
+            'keys' => array_keys($collection),
+        ]);
+
+        return $collection;
     }
 
-    protected function getCustomHeaders(Email $email): ?array
+    /**
+     * Get all mail folders for the authenticated user
+     *
+     * @return array Mail folders
+     */
+    public function getMailFolders()
     {
-        return collect($email->getHeaders()->all())
-            ->filter(fn(HeaderInterface $header) => str_starts_with($header->getName(), 'X-'))
-            ->map(fn(HeaderInterface $header) => [
-                'name' => $header->getName(),
-                'value' => $header->getBodyAsString(),
-            ])
-            ->values()
-            ->all() ?: null;
+        $url = '/me/mailfolders';
+
+        return $this->get($url);
+    }
+
+    /**
+     * Get subfolders for a specific mail folder
+     *
+     * @param string $id Parent folder ID
+     * @return array Subfolders
+     */
+    public function getSubFolders($id)
+    {
+        $url = '/me/mailfolders/' . $id . '/childFolders';
+
+        return $this->get($url);
+    }
+
+    /**
+     * Get messages from a specific mail folder
+     *
+     * @param string $folder Folder name (default: 'inbox')
+     * @param bool $isRead Include read messages (default: true)
+     * @param int $skip Number of messages to skip (default: 0)
+     * @param int $limit Maximum number of messages to return (default: 20)
+     * @return array Messages
+     */
+    public function getMailMessagesFromFolder($folder = 'inbox', $isRead = true, $skip = 0, $limit = 20)
+    {
+        $url = '/me/mailfolders/' . $folder . '/messages?$select=Id,ReceivedDateTime,Subject,Sender,ToRecipients,From,Body,HasAttachments,InternetMessageHeaders&$skip=' . $skip . '&$top=' . $limit;
+        if (! $isRead) {
+            $url .= '&$filter=isRead ne true';
+        }
+
+        $response = $this->get($url);
+
+        $mails    = [];
+        foreach ($response as $mail) {
+            $to = optional(collect($mail['internetMessageHeaders'])->keyBy('name')->get('X-Rcpt-To'))['value'];
+
+            $mails[] = [
+                'id'           => $mail['id'],
+                'date'         => Carbon::parse($mail['receivedDateTime'])->format('d-m-Y H:i'),
+                'subject'      => $mail['subject'],
+                'from'         => $mail['from']['emailAddress'],
+                'to'           => ! blank($to) ? $to : optional($mail['toRecipients'])[0]['emailAddress']['address'],
+                'attachements' => $mail['hasAttachments'],
+                'body'         => $mail['body']['content'],
+            ];
+        }
+
+        return $mails;
+    }
+
+    /**
+     * Update a message
+     *
+     * @param string $id Message ID
+     * @param array $data Update data
+     * @return mixed API response
+     */
+    public function updateMessage($id, $data)
+    {
+        $url = '/me/messages/' . $id;
+
+        return $this->patch($url, $data);
+    }
+
+    /**
+     * Move a message to a different folder
+     *
+     * @param string $id Message ID
+     * @param string $destinationId Destination folder ID
+     * @return mixed API response
+     */
+    public function moveMessage($id, $destinationId)
+    {
+        $url = '/me/messages/' . $id . '/move';
+
+        return $this->post($url, ['destinationId' => $destinationId]);
+    }
+
+    /**
+     * Get a specific message by ID
+     *
+     * @param string $id Message ID
+     * @return mixed Message details
+     */
+    public function getMessage($id)
+    {
+        $url = config('socialite.office365.api_url') . '/me/messages/' . $id . '?$select=Id,ReceivedDateTime,createdDateTime,Subject,Sender,ToRecipients,From,HasAttachments,InternetMessageHeaders&$top=10&$skip=0';
+
+        return $this->get($url);
+    }
+
+    /**
+     * Get attachments for a specific message
+     *
+     * @param string $id Message ID
+     * @return mixed Message attachments
+     */
+    public function getMessageAttachements($id)
+    {
+        $url = '/me/messages/' . $id . '/attachments';
+
+        return $this->get($url);
     }
 }
