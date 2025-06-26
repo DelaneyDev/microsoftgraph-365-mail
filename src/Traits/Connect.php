@@ -24,10 +24,36 @@ trait Connect
      */
     protected function getAccessToken(): string
     {
-        // Because you're in single-user mode, there's exactly one record.
-        $token = MicrosoftGraphAccessToken::firstOrFail();
+        $token = \App\Models\MicrosoftGraphAccessToken::latest()->firstOrFail();
+
+        if (now()->greaterThan($token->expires_at)) {
+            $data = $this->refreshTokenFromApi(Crypt::decrypt($token->refresh_token));
+            $token->update([
+                'access_token' => Crypt::encrypt($data['access_token']),
+                'refresh_token' => Crypt::encrypt($data['refresh_token'] ?? Crypt::decrypt($token->refresh_token)),
+                'expires_at' => now()->addSeconds($data['expires_in']),
+            ]);
+        }
 
         return Crypt::decrypt($token->access_token);
+    }
+    
+    private function refreshTokenFromApi(string $refreshToken): array
+    {
+        $response = Http::asForm()->post(
+            'https://login.microsoftonline.com/' . config('services.microsoft.tenant') . '/oauth2/v2.0/token',
+            [
+                'client_id' => config('services.microsoft.client_id'),
+                'client_secret' => config('services.microsoft.client_secret'),
+                'grant_type' => 'refresh_token',
+                'refresh_token' => $refreshToken,
+                'scope' => 'https://graph.microsoft.com/.default offline_access',
+            ]
+        );
+
+        throw_if(!$response->successful(), new \Exception('Token refresh failed: ' . $response->body()));
+
+        return $response->json();
     }
 
     /**
