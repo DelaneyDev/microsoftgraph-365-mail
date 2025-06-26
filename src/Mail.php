@@ -7,18 +7,6 @@ use LLoadout\Microsoftgraph\Traits\Authenticate;
 use LLoadout\Microsoftgraph\Traits\Connect;
 use Symfony\Component\Mime\Part\DataPart;
 
-/**
- * Mail class for interacting with Microsoft Graph API's mail functionality
- *
- * This class provides methods to interact with Microsoft Graph API's mail features including:
- * - Sending emails with attachments
- * - Managing mail folders
- * - Reading and managing messages
- * - Moving messages between folders
- * - Retrieving message attachments
- *
- * @package LLoadout\Microsoftgraph
- */
 class Mail
 {
     use Authenticate, Connect;
@@ -27,7 +15,6 @@ class Mail
      * Send an email using Microsoft Graph API
      *
      * @param mixed $mailable The mailable object containing email details
-     * @return void
      */
     public function sendMail($mailable): void
     {
@@ -35,41 +22,52 @@ class Mail
     }
 
     /**
-     * Prepare the email body for sending
+     * Build the Graph API payload
      *
-     * @param mixed $mailable The mailable object
-     * @return array The formatted email body
+     * @param mixed $mailable
+     * @return array
      */
-    protected function getBody($mailable)
+    protected function getBody($mailable): array
     {
-        $html = $mailable->getHtmlBody();
-        $from = $mailable->getFrom();
-        $to = $mailable->getTo();
-        $cc = $mailable->getCc();
-        $bcc = $mailable->getBcc();
+        $html    = $mailable->getHtmlBody();
+        $from    = $mailable->getFrom();
+        $to      = $mailable->getTo();
+        $cc      = $mailable->getCc();
+        $bcc     = $mailable->getBcc();
         $replyTo = $mailable->getReplyTo();
         $subject = $mailable->getSubject();
 
         return array_filter([
             'message' => [
-                'subject' => $subject,
-                'sender' => $this->formatRecipients($from)[0],
-                'from' => $this->formatRecipients($from)[0],
-                'replyTo' => $this->formatRecipients($replyTo),
+                'subject'      => $subject,
+                'sender'       => $this->formatRecipients($from)[0] ?? null,
+                'from'         => $this->formatRecipients($from)[0] ?? null,
+                'replyTo'      => $this->formatRecipients($replyTo),
                 'toRecipients' => $this->formatRecipients($to),
                 'ccRecipients' => $this->formatRecipients($cc),
-                'bccRecipients' => $this->formatRecipients($bcc),
-                'body' => $this->getContent($html),
-                'attachments' => $this->toAttachmentCollection($mailable->getAttachments()),
+                'bccRecipients'=> $this->formatRecipients($bcc),
+                'body'         => $this->getContent($html),
+                'attachments'  => $this->toAttachmentCollection($mailable->getAttachments()),
             ],
         ]);
     }
 
     /**
-     * Format email recipients into Microsoft Graph API format
+     * Wrap the HTML body for Graph
+     */
+    private function getContent(?string $html): array
+    {
+        return [
+            'contentType' => 'html',
+            'content'     => $html,
+        ];
+    }
+
+    /**
+     * Turn Laravel/Symfony recipients into Graph format
      *
-     * @param mixed $recipients Single recipient or array of recipients
-     * @return array Formatted recipients array
+     * @param mixed $recipients
+     * @return array
      */
     protected function formatRecipients($recipients): array
     {
@@ -86,27 +84,13 @@ class Mail
         foreach ($recipients as $address) {
             $addresses[] = [
                 'emailAddress' => [
-                    'name' => $address->getName(),
+                    'name'    => $address->getName(),
                     'address' => $address->getAddress(),
                 ],
             ];
         }
 
         return $addresses;
-    }
-
-    /**
-     * Format email content into Microsoft Graph API format
-     *
-     * @param string $html HTML content of the email
-     * @return array Formatted content array
-     */
-    private function getContent($html): array
-    {
-        return [
-            'contentType' => 'html',
-            'content' => $html,
-        ];
     }
 
     /**
@@ -120,10 +104,10 @@ class Mail
         $collection = [];
 
         foreach ($attachments as $item) {
-            // Symfony 6+: DataPart instances
+            // New Symfony 6+ DataPart
             if ($item instanceof DataPart) {
                 $filename = $item->getFilename() ?: 'attachment';
-                $raw      = (string) $item->getBody(); // cast stream to string
+                $raw      = (string) $item->getBody();
                 $mime     = $item->getMediaType() . '/' . $item->getMediaSubtype();
             }
             // Legacy array format: ['file' => '/path/to/file']
@@ -134,17 +118,17 @@ class Mail
                 $filename = $file->getFilename();
             }
             else {
-                // Skip anything unexpected
+                // skip anything unexpected
                 continue;
             }
 
             $collection[] = [
+                '@odata.type'  => '#microsoft.graph.fileAttachment',
                 'name'         => $filename,
                 'contentId'    => uniqid('', true) . '@lloadout.graph',
                 'contentBytes' => base64_encode($raw),
                 'contentType'  => $mime,
                 'size'         => strlen($raw),
-                '@odata.type'  => '#microsoft.graph.fileAttachment',
                 'isInline'     => true,
             ];
         }
