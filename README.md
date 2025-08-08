@@ -28,7 +28,7 @@ https://docs.microsoft.com/en-us/graph/auth-register-app-v2
 You can install the package via composer:
 
 ```bash
-composer require lloadout/microsoftgraph
+composer require DelaneyDev/microsoftgraph-365-mail
 ```
 
 Add this to your .env file and fill it with the values you specified in Microsoft Azure Portal app registration.  
