@@ -395,6 +395,3 @@ Please review [our security policy](../../security/policy).
 MIT — see [LICENSE](LICENSE.md).
 
 ```
-
-Want me to drop this straight into a `README.md` file for you?
-```
