@@ -1,7 +1,3 @@
-Here you go — a clean, copy-paste-ready README that puts **your fork (DelaneyDev)** and its **Single-User (no-reply) mode** front and center, while still keeping the original **session-based** flow for multi-user apps. It’s formatted to be super easy to follow and explains the differences clearly.
-
----
-
 <p align="center">
   <img src="https://github.com/LLoadout/assets/blob/master/LLoadout_microsoftgraph.png" width="500" title="LLoadout logo">
 </p>
