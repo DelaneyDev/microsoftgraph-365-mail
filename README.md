@@ -5,7 +5,7 @@
 [![Latest Version on Packagist](https://img.shields.io/packagist/v/delaneydev/microsoftgraph-365-mail.svg?style=flat-square)](https://packagist.org/packages/delaneydev/microsoftgraph-365-mail)
 [![Total Downloads](https://img.shields.io/packagist/dt/delaneydev/microsoftgraph-365-mail.svg?style=flat-square)](https://packagist.org/packages/delaneydev/microsoftgraph-365-mail)
 
-# Laravel Microsoft Graph (DelaneyDev Fork)
+# Laravel Microsoft Graph (DelaneyDev Fork) Native Laravel Microsoft Mail driver 
 
 **What this package does**
 
