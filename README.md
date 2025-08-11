@@ -345,18 +345,8 @@ You can enable **either** mode via `.env`.
 
 ## Troubleshooting
 
-* **“The MAC is invalid”**
-  Run the reset one-liner to clear caches and restart workers:
-
-  ```bash
-  php artisan down && php artisan cache:clear && php artisan config:clear && php artisan route:clear && php artisan view:clear && php artisan event:clear && php artisan clear-compiled && php artisan queue:restart && php artisan up
-  ```
-
-  Also ensure:
-
-  * All servers share the same `APP_KEY`
-  * Queue workers restarted after changing `.env`
-  * Clear app cache/Redis if tokens were encrypted with an old key
+* **Queue workers restarted after changing `.env`
+* **Clear app cache/Redis if tokens were encrypted with an old key
 
 * **403 / insufficient permissions**
   Confirm **Mail.Send (Delegated)** is added and **admin consent** granted in Azure.
