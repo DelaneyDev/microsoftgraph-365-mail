@@ -22,13 +22,10 @@ It’s perfect for:
 
 ## Quick Start (TL;DR)
 
-1) Install  
+1) Install & Publish + migrate
 ```bash
 composer require delaneydev/microsoftgraph-365-mail
 
-2. Publish + migrate
-
-```bash
 php artisan vendor:publish --tag=microsoftgraph-config
 php artisan vendor:publish --tag=microsoftgraph-model
 php artisan vendor:publish --tag=microsoftgraph-migrations
@@ -44,18 +41,6 @@ php artisan migrate
 ```php
 Mail::to('user@example.com')->send(new MyMailable());
 ```
-
----
-
-## 0) (Recommended) Reset Laravel caches/tokens before first setup
-
-Avoid “**The MAC is invalid**” caused by stale encrypted data:
-
-```bash
-php artisan down && php artisan cache:clear && php artisan config:clear && php artisan route:clear && php artisan view:clear && php artisan event:clear && php artisan clear-compiled && php artisan queue:restart && php artisan up
-```
-
----
 
 ## 1) Azure App — Create and Grant Delegated Mail.Send (don’t change anything else)
 
